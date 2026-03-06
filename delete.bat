@@ -1,0 +1,7 @@
+del "E15-switch-long-press.ino"
+del "EEPROMWRINTE.ino"
+del "Test Pump Value Timer.ino"
+del "TestCode001.ino"
+del "CONF.h"
+del "LCD.h"
+del "clean.sh"
