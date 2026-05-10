@@ -1,55 +1,65 @@
-# 💧 Arduino Water Vending Machine
+<div align="center">
+  
+# 💧 Smart Water Vending Machine
+**The Next-Generation Automated Water Dispenser System**
 
-## 📌 ภาพรวมโปรเจคต์ (Project Overview)
-โปรเจคต์ตู้กดน้ำดื่มหยอดเหรียญอัตโนมัติ ควบคุมด้วยบอร์ด Arduino (AVR Architecture เช่น Uno R3) เน้นการออกแบบโครงสร้างโค้ดที่เสถียร ใช้ทรัพยากรหน่วยความจำ (SRAM) อย่างคุ้มค่าที่สุด และไม่ใช้ฟังก์ชัน `delay()` ที่ทำให้ระบบหน่วง (Non-blocking Design) พร้อมกับระบบการแสดงผลอัจฉริยะ (Smart Display Rendering) ที่ป้องกันอาการหน้าจอกะพริบ และจัดการส่งข้อมูลไปยังบอร์ด ESP-01 ได้อย่างมีประสิทธิภาพ
+[![Arduino Uno](https://img.shields.io/badge/Board-Arduino%20Uno-00979D?style=for-the-badge&logo=arduino&logoColor=white)](https://www.arduino.cc/)
+[![IoT Ready](https://img.shields.io/badge/IoT-ESP8266-2496ED?style=for-the-badge&logo=espressif&logoColor=white)](#)
+[![Performance](https://img.shields.io/badge/Performance-Ultra%20Fast-success?style=for-the-badge)](#)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](#)
 
-### 🚀 ฟีเจอร์ที่ได้รับการปรับปรุง (Optimized Features)
-* **AVR Memory Optimization**: รีแฟคเตอร์ชนิดของตัวแปรจาก `int` เป็น `uint8_t` และ `uint16_t` เพื่อประหยัดพื้นที่ SRAM และใช้ Macro `F()` สำหรับข้อความ String ทั้งหมดบน LCD และ Serial Monitor เพื่อบังคับเก็บข้อมูลไว้ใน Flash Memory (PROGMEM) ทำให้บอร์ด Arduino มีแรมเหลือเยอะและทำงานเสถียรเมื่อเปิดทิ้งไว้
-* **Non-blocking Loop & I/O Overhead Reduction**: ระบบทำงานได้อย่างต่อเนื่อง ตอบสนองทันทีโดยไม่มีสะดุด มีการสร้างตัวแปร `boolean` เพื่อจำสถานะรีเลย์ (เช่น `isCoinLightOn`, `isFrontLightOn`) ลดการเรียกใช้คำสั่ง `digitalRead()` และ `digitalWrite()` ซ้ำซ้อน ช่วยเร่งความเร็วในการประมวลผลลูปหลักให้เร็วขึ้นมาก
-* **Smart I2C LCD Rendering**: โค้ดแสดงผลบนจอ LCD จะอัปเดตเฉพาะเมื่อมีการเปลี่ยนแปลงของข้อมูลเท่านั้น ช่วยลดภาระของ I2C Bus และแก้ปัญหาหน้าจอกะพริบได้อย่างเด็ดขาด
-* **Safe Interrupt Handling**: การใช้ `noInterrupts()` และ `interrupts()` ในจุดที่มีการรีเซ็ต Flag (เช่น `isCoinInserted`, `isDispenseRequested`) ป้องกันปัญหา Race Condition แบบ 100%
-* **ESP-01 Integration via SoftwareSerial**: เพิ่มการเชื่อมต่อกับโมดูล Wi-Fi ESP-01 โดยใช้ `SoftwareSerial` แยกไปที่ขา RX=5, TX=6 ทำให้ไม่เกิด Conflict กับ Hardware Serial หลัก (ขา 0, 1) ทำให้สามารถ Debug ข้อมูลผ่าน Serial Monitor ไปพร้อมกับส่งข้อมูลให้ ESP-01 ได้อย่างสมบูรณ์
+*ยกระดับตู้กดน้ำหยอดเหรียญของคุณให้เป็น "Smart Vending Machine" ด้วยโค้ดที่ถูกออกแบบมาเพื่อประสิทธิภาพสูงสุด*
 
----
-
-## ⚙️ โครงสร้างการทำงานของโปรเจคต์ (Workflow Structure)
-
-### 1. 🟢 โหมดสแตนด์บาย (Standby & RTC Monitoring)
-* ระบบจะแสดงเวลาปัจจุบันบนหน้าจอ LCD
-* ทุกๆ 250 มิลลิวินาที ระบบจะเช็คเวลาจาก RTC (DS3231) เพื่ออัปเดตตัวเลขเวลาบนจอโดยไม่รบกวนจังหวะการทำงานอื่น ๆ
-* **ระบบไฟส่องสว่าง**: โค้ดจะเช็คเวลาจาก RTC ทุกๆ 1 วินาที หากเวลาอยู่ระหว่าง 18:00 น. ถึง 06:00 น. ระบบจะสั่งเปิดไฟหน้าตู้ (`PIN_RELAY_FRONT_LIGHT`) โดยตรวจสอบสถานะ `isFrontLightOn` เพื่อไม่ให้สั่งทำงานซ้ำซ้อน
-
-### 2. 🪙 โหมดรับเหรียญ (Coin Insertion - Interrupt Driven)
-* **Hardware Interrupt**: เมื่อเหรียญถูกหยอด สัญญาณจากเครื่องรับเหรียญจะส่งมาที่ขาขัดจังหวะ (Pin 3)
-* **ISR (Interrupt Service Routine)**: ฟังก์ชัน `onCoinInserted()` จะทำงานและเซ็ต Flag `isCoinInserted = true` ทันที
-* **Main Loop**: โค้ดใน Loop หลักจะตรวจสอบ Flag นี้ หากเป็นจริง ระบบจะ:
-  * ปิดการขัดจังหวะชั่วคราว ดึง Flag ลง และเปิดการขัดจังหวะคืนอย่างปลอดภัย
-  * เพิ่มจำนวนยอดเงิน (`totalBaths`) และคำนวณปริมาณน้ำ (`currentLiquidAmount`) รวมทั้งเวลาทำงานของปั๊ม (`dispenseTimeRemaining`) อย่างรวดเร็ว
-  * อัปเดตหน้าจอ LCD ทันที และสั่งเปิดไฟสถานะการหยอดเหรียญเป็นเวลา 500 ms (นับเวลาประมวลผลแบบ Non-blocking)
-
-### 3. 🚰 โหมดจ่ายน้ำ (Dispense Mode - Non-blocking)
-* **Button Interrupt**: เมื่อผู้ใช้กดปุ่มจ่ายน้ำ ขาขัดจังหวะ (Pin 2) จะทริกเกอร์ `onDispenseButtonPressed()`
-* **Validation**: ระบบจะเช็คว่ามียอดเงินที่หยอดไว้ (`totalBaths > 0`) และปั๊มน้ำไม่ได้กำลังทำงานอยู่ (`!isPumpActive`)
-* **Pump Execution**: ระบบจะสั่งเปิดรีเลย์ปั๊มน้ำ (`PIN_RELAY_PUMP`) และเก็บค่า `millis()` เริ่มต้นเอาไว้
-* **Async Timer**: ในขณะที่ปั๊มทำงาน ระบบจะคอยเปรียบเทียบเวลาจนกว่าจะครบกำหนดที่คำนวณจากยอดเงิน เมื่อครบแล้ว ระบบจะสั่งปิดปั๊มน้ำ อัปเดตปริมาณน้ำในถัง เคลียร์ยอดเงินเป็น 0 และรีเฟรชหน้าจอ
-
-### 4. 📊 ระบบจัดการข้อมูลน้ำคงเหลือ (Water Tank Tracking & ESP-01 Sync)
-* ระบบจะคำนวณและเก็บบันทึกปริมาณน้ำทั้งหมดที่ถูกจ่ายออกไปในตัวแปร `currentUsedValue`
-* ทุกๆ 5 วินาที ระบบจะคำนวณปริมาณน้ำคงเหลือ (ปริมาณความจุถัง - ปริมาณที่ใช้ไป)
-* ระบบจะส่งข้อมูลอัปเดตระดับน้ำไปยังบอร์ด ESP-01 ผ่านทาง `SoftwareSerial` (RX=5, TX=6) ในรูปแบบแพ็กเกจ `TANK:<value>` (เช่น `TANK:3500`) เพื่อให้ ESP-01 สามารถนำไปประมวลผลแจ้งเตือนผ่านช่องทางอื่น ๆ (เช่น LINE Notify หรือ Database) ได้แบบเรียลไทม์
+</div>
 
 ---
 
-## 💻 โครงสร้างของไฟล์ (File Structure)
-* `Arduino_WaterMachine.ino` - ไฟล์หลักของโปรเจคต์ ควบคุม State Machine, การรับ Interrupts, และการสื่อสารผ่าน Serial
-* `Config.h` - ไฟล์นิยามค่าคงที่ (Constants) เก็บการตั้งค่าพินแบบ Memory Optimized (`uint8_t`, `uint16_t`) ขาต่อ ESP-01 ขนาดความจุถังน้ำ และตัวแปร Global
-* `Display.h` / `Display.cpp` - จัดการการแสดงผลหน้าจอ LCD และการอ่านค่าจาก Keypad ออกแบบมาเป็นพิเศษเพื่อลดโหลด I2C (Smart Rendering) ป้องกัน Flicker และใช้ Macro `F()` ช่วยประหยัด SRAM
+## ✨ ทำไมต้อง Smart Water Vending? (Key Features)
+
+เปลี่ยนตู้กดน้ำธรรมดาให้ทำงานได้อย่างรวดเร็ว เสถียร และล้ำสมัย พร้อมรองรับการเชื่อมต่อกับระบบเครือข่าย
+
+🚀 **Ultra-Fast Processing** 
+> ระบบได้รับการรีดประสิทธิภาพการทำงานสูงสุด (Non-blocking Architecture) กดปุ๊บน้ำไหลปั๊บ หยอดเหรียญแล้วจอแสดงผลทันที ไม่มีอาการหน่วงหรือค้าง
+
+🛡️ **Enterprise-Grade Reliability** 
+> หมดปัญหาหน้าจอกะพริบหรือระบบรวน! ด้วย Smart LCD Rendering และการจัดการหน่วยความจำระดับลึก (AVR Memory Optimization) เครื่องสามารถเปิดทำงานได้ตลอด 24 ชั่วโมง 7 วันโดยไม่มีสะดุด
+
+🌐 **IoT Ready (Cloud Sync)**
+> ล้ำหน้ากว่าด้วยการเชื่อมต่อแบบ Real-time ผสานการทำงานร่วมกับบอร์ด ESP-01 ระบบพร้อมส่งข้อมูลยอดขายและปริมาณน้ำคงเหลือเข้าสู่เซิร์ฟเวอร์แบบไร้สาย (Wi-Fi) ทันที!
+
+⏱️ **Smart Time & Energy Management** 
+> ประหยัดพลังงานอัจฉริยะ มาพร้อมระบบ Real-Time Clock (RTC) สั่งเปิด-ปิดไฟป้ายอัตโนมัติในช่วงเวลากลางคืน
 
 ---
 
-## 💰 อัตราส่วนการคำนวณราคา (Pricing Logic)
-ระบบใช้ตัวแปร `MILLIS_PER_LITER` ในแฟ้ม `Config.h` เป็นฐานการคำนวณร่วมกับ `totalBaths`
-* **ปัจจุบันตั้งค่าไว้ที่**: `1 Liter = 5000 millis()` (5 วินาที)
-* ดังนั้น หากยอดเงินหยอด 1 บาท ระบบจะคำนวณได้น้ำ 1000 ml = ปั๊มน้ำทำงาน 5 วินาที
+## 💡 ไฮไลท์ทางเทคนิค (For Geeks)
+ถึงแม้ระบบจะเรียบง่ายแต่เบื้องหลังอัดแน่นไปด้วยเทคโนโลยี:
+- **Zero-Delay Design:** ไม่มีการใช้ `delay()` ที่ทำให้ระบบช้าลง 
+- **Safe Hardware Interrupts:** รับเหรียญได้อย่างแม่นยำ ไม่พลาดทุกยอดการเติม
+- **SRAM Optimized:** ใช้ทรัพยากรบอร์ดเพียงเสี้ยวเดียวด้วยการทำ PROGMEM (`F()` Macro) 
 
-*(อ้างอิงงบประมาณและฮาร์ดแวร์ สามารถดูได้ในเอกสาร `บัญชีซื้อของ.pdf`)*
+---
+
+## 🛠️ ฮาร์ดแวร์ที่รองรับ (Hardware Requirements)
+1. **Arduino Uno R3** (ตัวหลักสำหรับควบคุมเครื่อง)
+2. **ESP-01 / ESP8266** (สำหรับส่งข้อมูลเข้าคลาวด์/แจ้งเตือน LINE)
+3. **DS3231 RTC Module** (นาฬิกาเรียลไทม์)
+4. **I2C LCD 20x4** (จอแสดงผลการทำงาน)
+5. **Relay Module** (สำหรับปั๊มน้ำและไฟส่องสว่าง)
+6. **Coin Acceptor** (เครื่องรับเหรียญ)
+
+> 📝 **ดูงบประมาณและรายการอุปกรณ์ฉบับเต็มได้ที่:** [บัญชีซื้อของ.pdf](./บัญชีซื้อของ.pdf)
+
+---
+
+## 🚀 เริ่มต้นใช้งานด่วน (Quick Start)
+
+1. **ดาวน์โหลด** โค้ดทั้งหมดลงในเครื่องของคุณ
+2. **เชื่อมต่อสาย** ตาม `Config.h` (ระบุพินที่ใช้งานทั้งหมดไว้อย่างชัดเจน)
+3. **อัปโหลด** ลงบอร์ด Arduino Uno
+4. **พร้อมเปิดร้าน!** เครื่องพร้อมรับลูกค้าและเริ่มทำเงินให้คุณทันที 💸
+
+<br>
+<div align="center">
+  <i>"ลงทุนน้อยกว่า แต่ได้เทคโนโลยีที่เหนือกว่า 💧"</i>
+</div>
