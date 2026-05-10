@@ -15,47 +15,53 @@
 
 // --------------------- Global Variables Init ---------------------
 RTC_DS3231 rtc;
-SoftwareSerial espSerial(0, 1); // RX, TX for ESP-01
+SoftwareSerial espSerial(PIN_ESP_RX, PIN_ESP_TX); // RX=5, TX=6
 
-volatile int totalBaths = 0;
+volatile uint16_t totalBaths = 0;
 volatile unsigned long dispenseTimeRemaining = 0;
 volatile bool isCoinInserted = false;
 volatile bool isDispenseRequested = false;
 
-int currentLiquidAmount = 0;
-int currentUsedValue = 0;
-int tankLeftValue = MAX_TANK_CAPACITY;
+uint16_t currentLiquidAmount = 0;
+uint16_t currentUsedValue = 0;
+uint16_t tankLeftValue = MAX_TANK_CAPACITY;
 
 unsigned long pumpStartTime = 0;
 bool isPumpActive = false;
 
+unsigned long coinStatusLightOnTime = 0;
+bool isCoinLightOn = false;
+const unsigned long COIN_LIGHT_DURATION = 500; // MS to keep light on after coin
+
+bool isFrontLightOn = false;
+
 // --------------------- Interrupt Service Routines ---------------------
 void onCoinInserted() {
-  // Simple interrupt routine to flag coin insertion
-  // Debouncing is assumed to be handled by the coin acceptor hardware
   isCoinInserted = true;
 }
 
 void onDispenseButtonPressed() {
-  // Flag that the user requested dispensing
   isDispenseRequested = true;
 }
 
 // --------------------- Main Setup ---------------------
 void setup() {
-  Serial.begin(57600);
+  Serial.begin(9600);
   espSerial.begin(9600);
   Wire.begin();
   
-  displayInit();
-  
   if (!rtc.begin()) {
-    Serial.println("Couldn't find RTC");
+    Serial.println(F("Couldn't find RTC"));
   }
 
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
+  
+  displayInit();
+  displayTime(true);
+  displayLiquid(currentLiquidAmount, true);
+  displayPrice(totalBaths, true);
 
   // Define I/O Pins
   pinMode(PIN_RELAY_FRONT_LIGHT, OUTPUT);
@@ -67,7 +73,7 @@ void setup() {
   pinMode(PIN_BUTTON_DISPENSE, INPUT_PULLUP);
   pinMode(PIN_KEYPAD, INPUT);
 
-  // Initialize Relays (Active LOW assumed, but original code initialized them to 0 and 1 variously. Set safe OFF state = LOW for now)
+  // Initialize Relays (Active LOW assumed as safe OFF state)
   digitalWrite(PIN_RELAY_FRONT_LIGHT, LOW);
   digitalWrite(PIN_RELAY_STATUS_LIGHT, LOW);
   digitalWrite(PIN_RELAY_FLOAT_LIGHT, LOW);
@@ -84,28 +90,45 @@ void setup() {
 // --------------------- Main Loop ---------------------
 void loop() {
   unsigned long currentMillis = millis();
-  DateTime now = rtc.now();
 
   // 1. Process Inserted Coins
   if (isCoinInserted) {
-    totalBaths += 1; // Or read logic based on pulse count
+    noInterrupts();
+    isCoinInserted = false; // Reset flag safely
+    interrupts();
+
+    totalBaths += 1; 
     currentLiquidAmount = totalBaths * 1000; // Example: 1 Baht = 1000 ml
     dispenseTimeRemaining = totalBaths * MILLIS_PER_LITER; // Example: 1 Baht = 5 seconds
 
-    isCoinInserted = false; // Reset flag
-    digitalWrite(PIN_RELAY_STATUS_LIGHT, HIGH); // Temporary status indicator
-  } else {
+    if (!isCoinLightOn) {
+      digitalWrite(PIN_RELAY_STATUS_LIGHT, HIGH); // Temporary status indicator
+      isCoinLightOn = true;
+    }
+    coinStatusLightOnTime = currentMillis;
+    Serial.print(F("Coin inserted. Total: "));
+    Serial.println(totalBaths);
+  }
+
+  // Turn off coin status light after duration without blocking
+  if (isCoinLightOn && (currentMillis - coinStatusLightOnTime >= COIN_LIGHT_DURATION)) {
     digitalWrite(PIN_RELAY_STATUS_LIGHT, LOW);
+    isCoinLightOn = false;
   }
 
   // 2. Process Dispense Request (Non-blocking)
-  if (isDispenseRequested && totalBaths > 0 && !isPumpActive) {
-    isPumpActive = true;
-    pumpStartTime = currentMillis;
-    isDispenseRequested = false;
-    
-    digitalWrite(PIN_RELAY_PUMP, HIGH); // Turn ON pump
-    Serial.println("Dispensing Started...");
+  if (isDispenseRequested) {
+    noInterrupts();
+    isDispenseRequested = false; // Reset flag safely
+    interrupts();
+
+    if (totalBaths > 0 && !isPumpActive) {
+      isPumpActive = true;
+      pumpStartTime = currentMillis;
+      
+      digitalWrite(PIN_RELAY_PUMP, HIGH); // Turn ON pump
+      Serial.println(F("Dispensing Started..."));
+    }
   }
 
   // 3. Handle Active Pump Dispensing
@@ -115,37 +138,59 @@ void loop() {
       digitalWrite(PIN_RELAY_PUMP, LOW); // Turn OFF pump
       isPumpActive = false;
       
+      // Update Tank
+      currentUsedValue += currentLiquidAmount;
+      if (currentUsedValue > MAX_TANK_CAPACITY) currentUsedValue = MAX_TANK_CAPACITY;
+
       // Reset values
       totalBaths = 0;
       currentLiquidAmount = 0;
       dispenseTimeRemaining = 0;
-      Serial.println("Dispensing complete.");
+      Serial.println(F("Dispensing complete."));
+      
+      // Force display update
+      displayLiquid(currentLiquidAmount, true);
+      displayPrice(totalBaths, true);
     }
   }
 
   // 4. Update Time-based Lighting (18:00 ON, 06:00 OFF)
-  if (now.hour() >= 18 || now.hour() < 6) {
-    digitalWrite(PIN_RELAY_FRONT_LIGHT, HIGH);
-  } else {
-    digitalWrite(PIN_RELAY_FRONT_LIGHT, LOW);
+  static unsigned long lastRtcCheck = 0;
+  if (currentMillis - lastRtcCheck >= 1000) {
+    lastRtcCheck = currentMillis;
+    DateTime now = rtc.now();
+    
+    bool shouldBeOn = (now.hour() >= 18 || now.hour() < 6);
+    if (shouldBeOn && !isFrontLightOn) {
+      digitalWrite(PIN_RELAY_FRONT_LIGHT, HIGH);
+      isFrontLightOn = true;
+    } else if (!shouldBeOn && isFrontLightOn) {
+      digitalWrite(PIN_RELAY_FRONT_LIGHT, LOW);
+      isFrontLightOn = false;
+    }
   }
 
   // 5. Check Configuration Keypad
   KeypadButton pressedKey = readKeypad();
   if (pressedKey == BTN_CONF) {
-    Serial.println("Config mode selected.");
+    Serial.println(F("Config mode selected."));
   }
 
-  // 6. Update LCD Display (Non-blocking delay can be added if it flickers)
+  // 6. Update LCD Display (Smart rendering without delay)
   displayTime();
   displayLiquid(currentLiquidAmount);
   displayPrice(totalBaths);
 
   // 7. Send Real-time tank data to ESP-01
-  if (tankLeftValue != currentUsedValue) {
-    int leftValue = tankLeftValue - currentUsedValue;
-    espSerial.write(leftValue); // Send actual bytes or format string
+  static unsigned long lastEspSync = 0;
+  if (currentMillis - lastEspSync >= 5000) { // Sync every 5s
+    lastEspSync = currentMillis;
+    int16_t leftValue = tankLeftValue - currentUsedValue;
+    if (leftValue < 0) leftValue = 0;
+    
+    // Send data to ESP-01 via SoftwareSerial
+    espSerial.print(F("TANK:"));
+    espSerial.println(leftValue);
   }
-
-  delay(200); // Prevent LCD flicker and CPU hogging
 }
+

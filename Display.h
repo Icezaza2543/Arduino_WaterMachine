@@ -12,8 +12,8 @@ extern RTC_DS3231 rtc;
 
 // Function Prototypes
 void displayInit();
-void displayTime();
-void displayLiquid(int liquidMl);
-void displayPrice(int baths);
+void displayTime(bool force = false);
+void displayLiquid(uint16_t liquidMl, bool force = false);
+void displayPrice(uint16_t baths, bool force = false);
 
 #endif // DISPLAY_H
